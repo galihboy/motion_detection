@@ -16,7 +16,17 @@ Dibuat untuk pembelajaran mahasiswa UNIKOM pada mata kuliah Rekayasa Fitur.
 
 3. Optical Flow - Melacak pergerakan titik-titik tertentu
    * Mendetail dan dapat melacak arah gerakan
-   * Menggunakan metode Lucas-Kanade
+   * Menggunakan metode Lucas-Kanade (sparse optical flow)
+
+4. Dense Optical Flow - Menghitung pergerakan setiap piksel
+   * Visualisasi aliran gerakan seluruh frame
+   * Menggunakan metode Farneback
+   * Informasi arah dan magnitude gerakan
+
+5. Motion History Image (MHI) - Membuat jejak temporal gerakan
+   * Menampilkan riwayat gerakan dalam satu gambar
+   * Piksel yang baru bergerak tampak lebih terang
+   * Berguna untuk analisis pola gerakan
 
 🎮 Kontrol Program:
 - 'q' - Keluar dari program
@@ -316,6 +326,169 @@ class MotionDetector:
         
         return frame, flow_visualization, motion_detected, total_motion
     
+    def method_dense_optical_flow(self, frame):
+        """
+        Metode 4: Dense Optical Flow (Farneback)
+        
+        Menghitung optical flow untuk setiap pixel dalam frame, tidak hanya titik tertentu.
+        Memberikan informasi pergerakan yang lebih menyeluruh dibandingkan sparse optical flow.
+        Komputasi lebih berat tetapi hasil lebih detail.
+        
+        Algoritma:
+        1. Konversi frame ke grayscale
+        2. Hitung vektor pergerakan setiap piksel dengan algoritma Farneback
+        3. Konversi vektor ke representasi warna HSV (Hue=arah, Saturation=1, Value=magnitude)
+        
+        Args:
+            frame (numpy.ndarray): Frame yang akan dianalisis
+            
+        Returns:
+            tuple: (frame dengan anotasi, visualisasi dense flow, 
+                   status gerakan, total magnitude gerakan)
+        """
+        processed_frame = self.preprocess_frame(frame)
+        
+        # Inisialisasi default values
+        motion_detected = False
+        total_motion = 0
+        
+        # Untuk visualisasi
+        flow_visualization = np.zeros_like(frame)
+        
+        if self.previous_frame is None:
+            self.previous_frame = processed_frame
+            return frame, flow_visualization, motion_detected, total_motion
+        
+        # Hitung dense optical flow
+        flow = cv2.calcOpticalFlowFarneback(
+            self.previous_frame, processed_frame,
+            None,                   # Flow yang dihitung sebelumnya (None untuk inisialisasi)
+            0.5,                    # Pyramid scale
+            3,                      # Levels
+            15,                     # Window size
+            3,                      # Iterasi
+            5,                      # Poly_n
+            1.2,                    # Poly_sigma
+            0                       # Flags
+        )
+        
+        # Konversi flow ke magnitude dan angle
+        magnitude, angle = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+        
+        # Hitung total magnitude untuk deteksi gerakan
+        mean_magnitude = np.mean(magnitude)
+        total_motion = np.sum(magnitude)
+        
+        # Deteksi gerakan berdasarkan threshold magnitude
+        if mean_magnitude > 1.0:  # Threshold bisa disesuaikan
+            motion_detected = True
+        
+        # Buat visualisasi flow dengan representasi warna HSV
+        # Hue berdasarkan angle, Value berdasarkan magnitude
+        flow_hsv = np.zeros((processed_frame.shape[0], processed_frame.shape[1], 3), dtype=np.uint8)
+        flow_hsv[..., 0] = angle * 180 / np.pi / 2  # Hue (angle 0-360)
+        flow_hsv[..., 1] = 255                      # Saturation (max)
+        flow_hsv[..., 2] = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX) # Value = magnitude
+        
+        # Konversi ke BGR untuk visualisasi
+        flow_visualization = cv2.cvtColor(flow_hsv, cv2.COLOR_HSV2BGR)
+        
+        # Tambahkan teks status
+        if motion_detected:
+            cv2.putText(frame, f"Flow Avg: {mean_magnitude:.2f}", (10, 240), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        
+        # Update previous frame
+        self.previous_frame = processed_frame
+        
+        return frame, flow_visualization, motion_detected, total_motion
+    
+    def method_motion_history_image(self, frame):
+        """
+        Metode 5: Motion History Image (MHI)
+        
+        Membuat representasi temporal dari gerakan dengan menyimpan "jejak" gerakan
+        dari beberapa frame terakhir. Piksel yang baru bergerak memiliki intensitas
+        lebih tinggi daripada piksel yang bergerak sebelumnya.
+        
+        Algoritma:
+        1. Hitung perbedaan antar frame menggunakan threshold
+        2. Update Motion History Image: tingkatkan nilai di area bergerak, turunkan di area lain
+        3. Normalisasi MHI untuk visualisasi
+        
+        Implementasi ini tidak menggunakan cv2.motempl karena tidak tersedia di semua
+        versi OpenCV. Sebagai gantinya, kita mengimplementasikan MHI secara manual dengan
+        parameter decay_rate yang dapat disesuaikan menggunakan tombol 'a' (kurang) dan 'd' (tambah).
+        
+        Args:
+            frame (numpy.ndarray): Frame yang akan dianalisis
+            
+        Returns:
+            tuple: (frame dengan anotasi, MHI, status gerakan, jumlah gerakan)
+        """
+        processed_frame = self.preprocess_frame(frame)
+        
+        # Inisialisasi MHI jika belum ada
+        if not hasattr(self, 'motion_history'):
+            h, w = processed_frame.shape
+            self.motion_history = np.zeros((h, w), dtype=np.float32)
+            self.mhi_duration = 30  # Durasi history dalam frame
+            self.timestamp = 0
+            self.decay_rate = 1.0  # Rate pengurangan nilai MHI per frame
+            
+        if self.previous_frame is None:
+            self.previous_frame = processed_frame
+            return frame, np.zeros_like(frame), False, 0
+        
+        # Hitung perbedaan frame
+        frame_diff = cv2.absdiff(self.previous_frame, processed_frame)
+        _, motion_mask = cv2.threshold(frame_diff, 30, 1, cv2.THRESH_BINARY)
+        
+        # Update timestamp
+        self.timestamp += 1
+        
+        # Update MHI secara manual tanpa menggunakan cv2.motempl:
+        # 1. Di area yang terdapat gerakan, isi dengan nilai timestamp saat ini
+        mask_idx = (motion_mask > 0)
+        self.motion_history[mask_idx] = self.timestamp
+        
+        # 2. Kurangi nilai MHI sesuai dengan decay rate di area tanpa gerakan
+        # dan pastikan tidak ada nilai negatif
+        no_motion_idx = ~mask_idx
+        self.motion_history[no_motion_idx] = np.maximum(0, self.motion_history[no_motion_idx] - self.decay_rate)
+        
+        # Normalisasi MHI untuk visualisasi (0-255)
+        mhi_vis = np.clip(
+            self.motion_history * (255.0 / self.mhi_duration), 
+            0, 255
+        ).astype(np.uint8)
+        
+        # Buat visualisasi berwarna
+        mhi_color = cv2.applyColorMap(mhi_vis, cv2.COLORMAP_JET)
+        
+        # Deteksi gerakan
+        motion_detected = False
+        total_motion = np.sum(motion_mask)  # Jumlah piksel bergerak
+        
+        if total_motion > self.motion_threshold / 10:  # Sesuaikan threshold
+            motion_detected = True
+            
+            # Temukan kontur gerakan dari MHI
+            mhi_binary = cv2.threshold(mhi_vis, 50, 255, cv2.THRESH_BINARY)[1]
+            contours, _ = cv2.findContours(mhi_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Gambar kontur gerakan pada frame
+            cv2.drawContours(frame, contours, -1, (0, 255, 255), 2)
+            
+            # Tambahkan teks info
+            cv2.putText(frame, f"MHI Motion: {total_motion:.0f}", (10, 240), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        
+        # Update previous frame
+        self.previous_frame = processed_frame
+        
+        return frame, mhi_color, motion_detected, total_motion
+    
     def start_recording(self, frame_width, frame_height, fps=20.0):
         """Mulai recording video"""
         if not self.recording:
@@ -346,6 +519,7 @@ class MotionDetector:
         - previous_frame: Frame sebelumnya
         - track_points: Points untuk optical flow
         - background_subtractor: Model background
+        - motion_history: Motion History Image
         """
         self.previous_frame = None
         self.track_points = None
@@ -353,6 +527,12 @@ class MotionDetector:
         self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
             detectShadows=True, varThreshold=50, history=500
         )
+        # Reset motion history
+        if hasattr(self, 'motion_history'):
+            h, w = self.motion_history.shape
+            self.motion_history = np.zeros((h, w), dtype=np.float32)
+            self.timestamp = 0
+            self.decay_rate = 1.0  # Reset decay rate ke nilai default
     
     def detect_motion_webcam(self, camera_info, method='background', window_width=800, window_height=600):
         """Main function untuk deteksi motion dari webcam"""
@@ -390,7 +570,10 @@ class MotionDetector:
         print("  '1' - Background Subtraction")
         print("  '2' - Frame Difference") 
         print("  '3' - Optical Flow")
-        print("  '+'/'-' - Ubah sensitivity")
+        print("  '4' - Dense Optical Flow")
+        print("  '5' - Motion History Image (MHI)")
+        print("  '+'/'-' - Ubah sensitivity threshold")
+        print("  'a'/'d' - Kurangi/tambah MHI decay rate (hanya mode MHI)")
         
         cv2.namedWindow("Motion Detection", cv2.WINDOW_NORMAL)
         cv2.namedWindow("Motion Mask", cv2.WINDOW_NORMAL)
@@ -417,6 +600,10 @@ class MotionDetector:
                 result_frame, mask, motion_detected, motion_value = self.method_frame_difference(frame)
             elif method == 'optical':
                 result_frame, mask, motion_detected, motion_value = self.method_optical_flow(frame)
+            elif method == 'dense_flow':
+                result_frame, mask, motion_detected, motion_value = self.method_dense_optical_flow(frame)
+            elif method == 'mhi':
+                result_frame, mask, motion_detected, motion_value = self.method_motion_history_image(frame)
             else:
                 result_frame, mask, motion_detected, motion_value = self.method_background_subtraction(frame)
             
@@ -490,12 +677,30 @@ class MotionDetector:
                 method = 'optical'
                 self.reset_detection_state()
                 print("🔄 Beralih ke Optical Flow")
+            elif key == ord("4"):
+                method = 'dense_flow'
+                self.reset_detection_state()
+                print("🔄 Beralih ke Dense Optical Flow")
+            elif key == ord("5"):
+                method = 'mhi'
+                self.reset_detection_state()
+                print("🔄 Beralih ke Motion History Image")
             elif key == ord("+") or key == ord("="):
                 self.motion_threshold += 500
                 print(f"📈 Threshold: {self.motion_threshold}")
             elif key == ord("-"):
                 self.motion_threshold = max(100, self.motion_threshold - 500)
                 print(f"📉 Threshold: {self.motion_threshold}")
+            elif key == ord("d") and method == 'mhi':
+                # Ubah decay rate untuk MHI
+                if hasattr(self, 'decay_rate'):
+                    self.decay_rate = min(5.0, self.decay_rate + 0.5)
+                    print(f"📈 MHI Decay Rate: {self.decay_rate}")
+            elif key == ord("a") and method == 'mhi':
+                # Ubah decay rate untuk MHI
+                if hasattr(self, 'decay_rate'):
+                    self.decay_rate = max(0.1, self.decay_rate - 0.5)
+                    print(f"📉 MHI Decay Rate: {self.decay_rate}")
         
         # Cleanup
         if self.recording:
@@ -536,10 +741,13 @@ def main():
     print("1. Background Subtraction (Rekomendasi untuk kamera statis)")
     print("2. Frame Difference (Cocok untuk gerakan cepat)")
     print("3. Optical Flow (Tracking pergerakan detail)")
+    print("4. Dense Optical Flow (Visualisasi aliran gerakan)")
+    print("5. Motion History Image (Jejak temporal gerakan)")
     
-    method_choice = input("\nPilih metode (1-3, default=1): ").strip()
+    method_choice = input("\nPilih metode (1-5, default=1): ").strip()
     
-    methods = {'1': 'background', '2': 'difference', '3': 'optical'}
+    methods = {'1': 'background', '2': 'difference', '3': 'optical', 
+               '4': 'dense_flow', '5': 'mhi'}
     selected_method = methods.get(method_choice, 'background')
     
     # Deteksi kamera
@@ -616,8 +824,9 @@ if __name__ == "__main__":
 ║    q - Keluar                         ║
 ║    r - Mulai/Stop recording           ║
 ║    s - Screenshot                     ║
-║    1/2/3 - Ganti metode deteksi       ║
-║    +/- - Atur sensitivitas            ║
+║    1/2/3/4/5 - Ganti metode deteksi   ║
+║    +/- - Atur sensitivitas threshold  ║
+║    a/d - Atur MHI decay rate          ║
 ╚═══════════════════════════════════════╝
         """)
         main()
