@@ -1,6 +1,6 @@
 # Motion Detection - Deteksi Gerakan
 
-Aplikasi deteksi gerakan menggunakan OpenCV dengan tiga metode berbeda untuk mendeteksi gerakan. Program ini cocok untuk pembelajaran Computer Vision dalam mata kuliah Rekayasa Fitur.
+Aplikasi deteksi gerakan menggunakan OpenCV dengan lima metode berbeda untuk mendeteksi gerakan. Program ini cocok untuk pembelajaran Computer Vision dalam mata kuliah Rekayasa Fitur.
 
 ## 🚀 Fitur Utama
 
@@ -8,6 +8,8 @@ Aplikasi deteksi gerakan menggunakan OpenCV dengan tiga metode berbeda untuk men
   - Background Subtraction (MOG2)
   - Frame Difference
   - Optical Flow (Lucas-Kanade)
+  - Dense Optical Flow (Farneback)
+  - Motion History Image (MHI)
 
 - **Fitur lengkap**:
   - Multi-backend kamera (DirectShow, MSMF, Default) 
@@ -43,8 +45,10 @@ Pilih metode deteksi gerakan:
 1. Background Subtraction (Rekomendasi untuk kamera statis)
 2. Frame Difference (Cocok untuk gerakan cepat)
 3. Optical Flow (Tracking pergerakan detail)
+4. Dense Optical Flow (Visualisasi aliran gerakan)
+5. Motion History Image (Jejak temporal gerakan)
 
-Pilih metode (1-3, default=1): 
+Pilih metode (1-5, default=1): 
 ```
 
 ### 3. Auto-Deteksi Kamera
@@ -80,7 +84,10 @@ Pilih ukuran (1-4, default=2):
 - `1` - Beralih ke metode Background Subtraction
 - `2` - Beralih ke metode Frame Difference
 - `3` - Beralih ke metode Optical Flow
-- `+/-` - Menambah/mengurangi sensitivity (threshold)
+- `4` - Beralih ke metode Dense Optical Flow
+- `5` - Beralih ke metode Motion History Image
+- `+/-` - Menambah/mengurangi sensitivity threshold
+- `a/d` - Mengurangi/menambah MHI decay rate (hanya mode MHI)
 
 ## 📊 Penjelasan Metode
 
@@ -106,7 +113,7 @@ Metode sederhana yang membandingkan frame saat ini dengan frame sebelumnya. Seti
 
 **Cocok untuk**: Deteksi gerakan cepat, analisis real-time
 
-### 3. Optical Flow
+### 3. Optical Flow (Lucas-Kanade)
 
 Metode ini melacak pergerakan titik-titik tertentu dari satu frame ke frame berikutnya, menghitung vektor pergerakan.
 
@@ -116,6 +123,30 @@ Metode ini melacak pergerakan titik-titik tertentu dari satu frame ke frame beri
 - Informasi lebih lengkap
 
 **Cocok untuk**: Analisis gerakan detail, tracking objek
+
+### 4. Dense Optical Flow (Farneback)
+
+Metode ini menghitung optical flow untuk setiap piksel dalam frame, tidak hanya titik tertentu.
+Memberikan visualisasi aliran gerakan yang menyeluruh dengan pemetaan warna.
+
+**Kelebihan**:
+- Visualisasi menyeluruh dari aliran pergerakan
+- Pendeteksian gerakan yang lebih halus
+- Informasi arah dan magnitude untuk setiap piksel
+
+**Cocok untuk**: Visualisasi aliran gerakan, analisis pola pergerakan kompleks
+
+### 5. Motion History Image (MHI)
+
+Membuat representasi temporal dari gerakan dengan menyimpan "jejak" gerakan dari beberapa frame terakhir. 
+Piksel yang baru bergerak memiliki intensitas lebih tinggi daripada piksel yang bergerak sebelumnya.
+
+**Kelebihan**:
+- Merekam jejak gerakan dalam satu representasi gambar
+- Memberikan konteks waktu pada gerakan
+- Berguna untuk mengenali pola gerakan
+
+**Cocok untuk**: Analisis gerakan temporal, pengenalan gesture, klasifikasi aktivitas
 
 ## 🔍 Tips Troubleshooting
 
@@ -130,6 +161,9 @@ Metode ini melacak pergerakan titik-titik tertentu dari satu frame ke frame beri
 
 - **Deteksi terlalu sensitif/tidak sensitif**:
   - Atur threshold dengan tombol `+/-`
+  - Untuk MHI, atur decay rate dengan `a/d`:
+    - Decay rate tinggi (tombol 'd'): jejak gerakan cepat menghilang
+    - Decay rate rendah (tombol 'a'): jejak gerakan bertahan lebih lama
   - Ganti metode yang lebih sesuai dengan kondisi
 
 ## 🎓 Konsep Teknis
@@ -137,6 +171,8 @@ Metode ini melacak pergerakan titik-titik tertentu dari satu frame ke frame beri
 - **Background Subtraction**: Menggunakan MOG2 (Mixture of Gaussians) untuk model background
 - **Frame Difference**: Menggunakan absolute difference dan threshold
 - **Optical Flow**: Menggunakan Lucas-Kanade optical flow untuk tracking points
+- **Dense Optical Flow**: Menggunakan algoritma Farneback untuk menghasilkan flow vector per piksel
+- **Motion History Image**: Membuat representasi temporal gerakan dengan implementasi manual (tanpa cv2.motempl)
 
 ## 📂 Output
 
